@@ -1,0 +1,28 @@
+[project]
+name = "claude-garmin-mcp"
+version = "0.1.0"
+description = "Read-only Garmin Connect tools for chatting with your data"
+readme = "README.md"
+authors = [
+    { name = "0-sv", email = "ajsverbeek@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "curl-cffi>=0.16.3",
+    "garminconnect>=0.3,<0.4",
+    "mcp>=1.26,<2",
+]
+
+[project.scripts]
+garmin-mcp = "claude_garmin_mcp.server:main"
+garmin-login = "claude_garmin_mcp.auth:main"
+
+[build-system]
+requires = ["uv_build>=0.10.3,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
