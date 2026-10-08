@@ -102,3 +102,90 @@ def test_check_ins_pagination_and_missing_updates(tmp_path):
         path, "update_diary_entry", {"entry_id": "nonexistent", "entry": entry}
     ).isError
     assert call(path, "get_diary_entries", {**query, "end_date": "2026-10-01"}).isError
+
+
+@pytest.mark.parametrize(
+    "intake",
+    [
+        {"food": [{"name": "Pasta", "amount": "one bowl"}]},
+        {
+            "alcohol": [
+                {
+                    "name": "Beer",
+                    "amount": "two bottles",
+                    "volume_ml": 660,
+                    "abv_percent": 5,
+                }
+            ]
+        },
+        {"caffeine": [{"name": "Coffee", "amount": "one mug"}]},
+        {"caffeine": [{"name": "Energy drink", "caffeine_mg": 80}]},
+    ],
+)
+def test_intake_only_persists_and_can_be_corrected(tmp_path, intake):
+    path = tmp_path / "diary.sqlite3"
+    entry = {"occurred_at": "2026-10-08T14:00:00+02:00", **intake}
+    result = call(path, "log_diary_entry", {"entry": entry})
+    assert not result.isError
+    saved = result.structuredContent
+    assert saved["pain"] is None
+    assert saved["symptom_free"] is False
+    for field, items in intake.items():
+        for key, value in items[0].items():
+            assert saved[field][0][key] == value
+    if "caffeine" in intake and "caffeine_mg" not in intake["caffeine"][0]:
+        assert saved["caffeine"][0]["caffeine_mg"] is None
+    loaded = call(
+        path,
+        "get_diary_entries",
+        {"start_date": "2026-10-08", "end_date": "2026-10-08"},
+    ).structuredContent["entries"][0]
+    assert loaded == saved
+    corrected = call(
+        path,
+        "update_diary_entry",
+        {
+            "entry_id": saved["entry_id"],
+            "entry": {**entry, "notes": "Corrected context"},
+        },
+    ).structuredContent
+    for field in intake:
+        assert corrected[field] == saved[field]
+
+
+@pytest.mark.parametrize(
+    "intake",
+    [
+        {"food": [{"name": "   "}]},
+        {"food": []},
+        {"alcohol": [{"name": "Beer", "volume_ml": -1}]},
+        {"alcohol": [{"name": "Beer", "abv_percent": 101}]},
+        {"caffeine": [{"name": "Coffee", "caffeine_mg": -1}]},
+        {"caffeine": [{"name": "Coffee", "caffeine_mg": True}]},
+    ],
+)
+def test_invalid_intake_is_rejected_without_writes(tmp_path, intake):
+    path = tmp_path / "diary.sqlite3"
+    result = call(
+        path,
+        "log_diary_entry",
+        {"entry": {"occurred_at": "2026-10-08T14:00:00+02:00", **intake}},
+    )
+    assert result.isError
+    assert not path.exists()
+
+
+def test_old_entries_read_with_unknown_intake():
+    import json
+
+    row = {
+        "id": "old",
+        "recorded_at": "original",
+        "updated_at": "original",
+        "data": json.dumps({"notes": "Coffee after lunch", "pain": 2}),
+    }
+    decoded = Diary.decode(row)
+    assert decoded["notes"] == "Coffee after lunch"
+    assert decoded["food"] is None
+    assert decoded["alcohol"] is None
+    assert decoded["caffeine"] is None

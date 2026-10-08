@@ -96,7 +96,7 @@ owner-only file permissions. Override with `GARMIN_DIARY_PATH` in the MCP server
 environment. It is a normal SQLite database, not encrypted. Selected entries are
 returned to your chat client when it calls diary tools.
 
-- `log_diary_entry(entry)`: save a reported episode or symptom-free check-in.
+- `log_diary_entry(entry)`: save symptoms, food/drink intake, or a symptom-free check-in.
 - `get_diary_entries(start_date, end_date, limit?, offset?)`: read an inclusive
   date range; follow `next_offset` for additional results.
 - `update_diary_entry(entry_id, entry)`: replace an entry with corrected values;
@@ -107,7 +107,8 @@ Entries require `occurred_at` with a timezone offset, for example
 `2026-10-08T14:00:00+02:00`. Use your Garmin-local offset to align daily summaries.
 The server separately records when you logged and last updated each entry in UTC.
 Optional fields: pain, bloating, nausea, urgency, and perceived_stress (0–10),
-bristol_type (1–7), and notes (meals, caffeine/alcohol, medication changes, etc.).
+bristol_type (1–7), structured food/alcohol/caffeine lists, and notes (medication
+changes or other context).
 Omitted scores stay unknown. `symptom_free: true` explicitly records a good-day
 check-in; days without entries are unrecorded, not assumed symptom-free.
 Entries are listed by local occurrence date, then logging time.
@@ -135,3 +136,28 @@ instructions depends on your chat client; this is not an automatic notification.
 A stdio MCP server cannot start a chat, wake the assistant, or deliver scheduled
 reminders. For daily prompts outside a conversation, use a calendar/phone reminder
 or a separately configured scheduler. No scheduled reminder is configured here.
+
+
+### Food, alcohol and caffeine
+
+Use the existing diary tools for intake-only entries or intake alongside symptoms:
+
+- `food`: items with `name` and optional `amount` (e.g. “one bowl”).
+- `alcohol`: drinks with `name`, optional `amount`, total `volume_ml` consumed,
+  and `abv_percent` if known.
+- `caffeine`: sources with `name`, optional `amount`, and total `caffeine_mg`
+  consumed if known.
+
+Names and portions preserve what you report. The assistant should not guess
+ingredients, caffeine doses or alcohol strength. Unknown intake remains null,
+not zero. Lists must contain at least one item when provided; use notes for
+explicit abstinence reports and their time period, such as “no alcohol today”.
+
+Try “Log one coffee at 9 am”, “Log two 330 ml beers, 5% ABV, at 7 pm”, or
+“Log a bowl of pasta at 1 pm”. Supply the date/offset if the assistant needs it.
+Different consumption times use separate entries so timing relative to symptoms
+is preserved. Symptoms are optional, and intake alone does not imply symptom-free.
+
+Existing entries require no migration. Older notes remain intact; their new
+intake fields are returned as unknown until explicitly corrected. Reconnect your
+MCP client after updating to load the new tool schemas.

@@ -13,13 +13,51 @@ from mcp.types import ToolAnnotations
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 Score = Annotated[int, Field(strict=True, ge=0, le=10)]
+Text = Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]
+PositiveAmount = Annotated[float, Field(strict=True, gt=0, allow_inf_nan=False)]
+
+
+class FoodItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: Text = Field(description="Food/meal as reported; do not infer ingredients.")
+    amount: Text | None = Field(
+        default=None, description="Reported portion, e.g. one bowl."
+    )
+
+
+class AlcoholDrink(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: Text = Field(description="Reported drink, e.g. red wine or beer.")
+    amount: Text | None = Field(
+        default=None, description="Reported amount, e.g. two glasses."
+    )
+    volume_ml: PositiveAmount | None = Field(
+        default=None, description="Total volume consumed in ml, only if known."
+    )
+    abv_percent: (
+        Annotated[float, Field(strict=True, ge=0, le=100, allow_inf_nan=False)] | None
+    ) = Field(default=None, description="Alcohol percentage, only if known.")
+
+
+class CaffeineIntake(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: Text = Field(description="Reported source, e.g. coffee, tea or energy drink.")
+    amount: Text | None = Field(
+        default=None, description="Reported amount, e.g. one espresso."
+    )
+    caffeine_mg: (
+        Annotated[float, Field(strict=True, ge=0, allow_inf_nan=False)] | None
+    ) = Field(
+        default=None,
+        description="Total caffeine consumed in mg, only if known; never estimate.",
+    )
 
 
 class DiaryEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     occurred_at: AwareDatetime = Field(
-        description="When symptoms/check-in occurred, with the user's local UTC offset."
+        description="When symptoms, intake or check-in occurred, with the user's local UTC offset."
     )
     symptom_free: bool = False
     pain: Score | None = None
@@ -28,6 +66,13 @@ class DiaryEntry(BaseModel):
     urgency: Score | None = None
     bristol_type: Annotated[int, Field(strict=True, ge=1, le=7)] | None = None
     perceived_stress: Score | None = None
+    food: Annotated[list[FoodItem], Field(min_length=1, max_length=50)] | None = None
+    alcohol: (
+        Annotated[list[AlcoholDrink], Field(min_length=1, max_length=50)] | None
+    ) = None
+    caffeine: (
+        Annotated[list[CaffeineIntake], Field(min_length=1, max_length=50)] | None
+    ) = None
     notes: Annotated[str, Field(max_length=4000)] | None = None
 
     @model_validator(mode="after")
@@ -43,7 +88,10 @@ class DiaryEntry(BaseModel):
             not self.symptom_free
             and all(value is None for value in symptoms)
             and (
-                self.bristol_type is None
+                self.food is None
+                and self.alcohol is None
+                and self.caffeine is None
+                and self.bristol_type is None
                 and self.perceived_stress is None
                 and not (self.notes and self.notes.strip())
             )
@@ -89,6 +137,9 @@ class Diary:
             "entry_id": row["id"],
             "recorded_at": row["recorded_at"],
             "updated_at": row["updated_at"],
+            "food": None,
+            "alcohol": None,
+            "caffeine": None,
             **json.loads(row["data"]),
         }
 
@@ -175,12 +226,17 @@ def register_diary_tools(server, diary: Diary):
 
     @server.tool(annotations=local_create)
     def log_diary_entry(entry: DiaryEntry) -> dict[str, Any]:
-        """Save a user-reported symptom episode or explicit symptom-free check-in locally.
+        """Save reported symptoms, food/drink intake, or a symptom-free check-in locally.
 
         Scores are 0–10, Bristol stool type 1–7. Omitted values stay unknown.
-        Ask for missing symptom time/offset rather than inventing them. Use the
+        Ask for missing event time/offset rather than inventing them. Use the
         user's Garmin-local offset so occurred_at's date aligns with daily health.
-        Put optional meals, caffeine/alcohol, medication changes in notes.
+        Use food, alcohol and caffeine lists for intake; symptoms are not required.
+        Record descriptions and portions as reported. Volume is total ml consumed,
+        ABV is percent, caffeine_mg is total mg consumed. Leave unknown quantities
+        null; never estimate caffeine, alcohol strength, or ingredients. Entries
+        at different consumption times should be logged separately. Put medication
+        changes or other context in notes. Missing intake is unknown, not zero.
         Save only when the user asks/agrees to log; do not infer diary facts from
         Garmin scores. Returns the saved entry ID. Does not contact Garmin.
         """
